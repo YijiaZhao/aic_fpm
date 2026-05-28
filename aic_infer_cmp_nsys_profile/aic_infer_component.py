@@ -36,6 +36,7 @@ from config import (
     AIC_BACKEND,
     AIC_SYSTEM,
     AIC_VERSION,
+    ATTN_FLOPS_CORRELATION,
     BACKEND_NAME,
     DECODE_CORRECTION_FACTOR,
     MODEL_CONFIG_KWARGS,
@@ -43,8 +44,6 @@ from config import (
     MODEL_PATH,
     PREFILL_CORRECTION_FACTOR,
     SUBDIR_CSV,
-    USE_POLYNOMIAL_FIT,
-    model_supports_polynomial_fit,
 )
 from utils import RequestInfo, prefill_seq_imbalance_correction
 
@@ -147,11 +146,11 @@ def estimate_batch_per_op(
         mean_input = np.mean([r.input_length for r in reqs])
         isl = int(mean_past + mean_input)
         prefix = int(mean_past)
-        correction = prefill_seq_imbalance_correction(reqs)
-        use_polynomial_fit = USE_POLYNOMIAL_FIT and model_supports_polynomial_fit(
-            MODEL_NAME, MODEL_PATH
+        correction = (
+            prefill_seq_imbalance_correction(reqs, MODEL_NAME, MODEL_PATH)
+            if ATTN_FLOPS_CORRELATION
+            else 1.0
         )
-        polynomial_request_infos = reqs if use_polynomial_fit else None
         if correction >= 0.4 and correction != 1.0:
             runtime_config = RuntimeConfig(
                 batch_size=len(reqs),
@@ -159,8 +158,6 @@ def estimate_batch_per_op(
                 prefix=prefix,
                 osl=1,
                 seq_imbalance_correction_scale=correction,
-                request_infos=polynomial_request_infos,
-                use_polynomial_fit=use_polynomial_fit,
             )
         else:
             runtime_config = RuntimeConfig(
@@ -168,8 +165,6 @@ def estimate_batch_per_op(
                 isl=isl,
                 prefix=prefix,
                 osl=1,
-                request_infos=polynomial_request_infos,
-                use_polynomial_fit=use_polynomial_fit,
             )
         summary = session.run_static(runtime_config, mode="static_ctx")
         latency_dict = summary.get_context_latency_dict()
@@ -319,10 +314,6 @@ def _print_results(
     )
     if hasattr(runtime_config, "seq_imbalance_correction_scale"):
         print(f"Correction    : {runtime_config.seq_imbalance_correction_scale}")
-    print(
-        "Polynomial Fit : "
-        f"{getattr(runtime_config, 'use_polynomial_fit', False)}"
-    )
     print(f"Estimated Total: {total_ms:.3f} ms")
     if measured_latency_ms is not None and measured_latency_ms > 0:
         ape = abs((total_ms - measured_latency_ms) / measured_latency_ms) * 100.0

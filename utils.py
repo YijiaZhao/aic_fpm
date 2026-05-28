@@ -128,6 +128,27 @@ def request_infos_signature(request_infos_str: str) -> Optional[str]:
 # 通用计算
 # ============================================================================
 
+GLM5_MODEL_MARKERS = ("glm-5", "glm5")
+
+GLM5_DSA_DIMS = {
+    "hidden_size": 6144,
+    "q_lora_rank": 2048,
+    "kv_lora_rank": 512,
+    "qk_nope_head_dim": 192,
+    "qk_rope_head_dim": 64,
+    "v_head_dim": 256,
+    "index_topk": 2048,
+    "index_head_dim": 128,
+    "index_n_heads": 32,
+}
+GLM5_DSA_LOCAL_NUM_HEADS = 8
+
+
+def is_glm5_model(model_name: str = "", model_path: str = "") -> bool:
+    """Return whether the configured model is GLM5."""
+    model_id = f"{model_name} {model_path}".lower().replace("_", "-")
+    return any(marker in model_id for marker in GLM5_MODEL_MARKERS)
+
 
 def ctx_attn_flops_ratio_with_avg(reqs: List[RequestInfo]) -> float:
     """
@@ -149,6 +170,99 @@ def ctx_attn_flops_ratio_with_avg(reqs: List[RequestInfo]) -> float:
     return actual_flops / avg_flops if avg_flops > 0 else 1.0
 
 
-def prefill_seq_imbalance_correction(reqs: List[RequestInfo]) -> float:
-    """Compute the original prefill seq imbalance correction."""
+def glm5_dsa_context_module_flops(
+    batch_size: float,
+    query_len: float,
+    prefix: float,
+    num_heads: int = GLM5_DSA_LOCAL_NUM_HEADS,
+) -> float:
+    """Compute GLM5 DSA context module work with the AIC sparse-attn formula."""
+    b = float(batch_size)
+    s = float(query_len)
+    prefix = float(prefix)
+    if b <= 0 or s <= 0:
+        return 0.0
+
+    hidden_size = GLM5_DSA_DIMS["hidden_size"]
+    q_lora = GLM5_DSA_DIMS["q_lora_rank"]
+    kv_lora = GLM5_DSA_DIMS["kv_lora_rank"]
+    qk_nope = GLM5_DSA_DIMS["qk_nope_head_dim"]
+    qk_rope = GLM5_DSA_DIMS["qk_rope_head_dim"]
+    v_dim = GLM5_DSA_DIMS["v_head_dim"]
+    index_topk = GLM5_DSA_DIMS["index_topk"]
+    index_head_dim = GLM5_DSA_DIMS["index_head_dim"]
+    index_n_heads = GLM5_DSA_DIMS["index_n_heads"]
+
+    tokens = b * s
+    full_s = prefix + s
+    qk_head_dim = qk_nope + qk_rope
+    attn_head_dim = kv_lora + qk_rope
+    proj_out = q_lora + kv_lora + qk_rope + index_head_dim
+
+    gemm_group_ops = (
+        2 * tokens * hidden_size * proj_out
+        + 2 * tokens * q_lora * (num_heads * qk_head_dim)
+        + 2 * tokens * q_lora * (index_n_heads * index_head_dim)
+        + 2 * tokens * hidden_size * index_n_heads
+        + 2 * tokens * (num_heads * v_dim) * hidden_size
+        + 2 * num_heads * tokens * qk_nope * kv_lora
+        + 2 * num_heads * tokens * kv_lora * v_dim
+    )
+
+    if full_s <= index_topk:
+        indexer_logits_ops = 0.0
+    else:
+        indexer_logits_ops = 2 * tokens * index_n_heads * index_head_dim * full_s
+
+    if full_s <= index_topk:
+        total_kv_pairs = b * (
+            full_s * (full_s + 1.0) - prefix * (prefix + 1.0)
+        ) / 2.0
+    elif prefix >= index_topk:
+        total_kv_pairs = tokens * index_topk
+    else:
+        ramp_pairs = b * (
+            index_topk * (index_topk + 1.0) - prefix * (prefix + 1.0)
+        ) / 2.0
+        sat_pairs = b * (full_s - index_topk) * index_topk
+        total_kv_pairs = ramp_pairs + sat_pairs
+
+    sparse_attn_ops = 2 * num_heads * (attn_head_dim + kv_lora) * total_kv_pairs
+    return float(gemm_group_ops + indexer_logits_ops + sparse_attn_ops)
+
+
+def glm5_dsa_context_module_flops_ratio_with_avg(reqs: List[RequestInfo]) -> float:
+    """
+    Compute the seq-imbalance correction using GLM5 sparse DSA module work.
+
+    This keeps the old correction mechanism, but replaces the full-attention
+    FLOPs proxy with the same GLM5 DSA context-module work terms used by AIC:
+    projection/indexer GEMMs, MQA indexer logits, and sparse top-k attention.
+    """
+    if len(reqs) == 1:
+        return 1.0
+
+    mean_past = np.mean([r.past_kv_length for r in reqs])
+    mean_input = np.mean([r.input_length for r in reqs])
+    avg_flops = glm5_dsa_context_module_flops(len(reqs), mean_input, mean_past)
+
+    actual_flops = 0.0
+    for r in reqs:
+        actual_flops += glm5_dsa_context_module_flops(
+            1,
+            r.input_length,
+            r.past_kv_length,
+        )
+
+    return actual_flops / avg_flops if avg_flops > 0 else 1.0
+
+
+def prefill_seq_imbalance_correction(
+    reqs: List[RequestInfo],
+    model_name: str = "",
+    model_path: str = "",
+) -> float:
+    """Compute the prefill seq imbalance correction for the configured model."""
+    if is_glm5_model(model_name, model_path):
+        return glm5_dsa_context_module_flops_ratio_with_avg(reqs)
     return ctx_attn_flops_ratio_with_avg(reqs)

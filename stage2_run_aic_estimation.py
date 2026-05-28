@@ -22,6 +22,7 @@ from .config import (
     AIC_BACKEND,
     AIC_SYSTEM,
     AIC_VERSION,
+    ATTN_FLOPS_CORRELATION,
     BACKEND_NAME,
     DATA_DIR,
     DECODE_CORRECTION_FACTOR,
@@ -31,9 +32,7 @@ from .config import (
     PREFILL_CORRECTION_FACTOR,
     SUBDIR_CSV,
     SUBDIR_ESTIMATION,
-    USE_POLYNOMIAL_FIT,
     get_output_dir,
-    model_supports_polynomial_fit,
 )
 from .utils import RequestInfo, logger, prefill_seq_imbalance_correction, write_csv
 
@@ -113,11 +112,11 @@ def estimate_batch_latency(reqs: List[RequestInfo], is_decode: bool) -> float:
         mean_input = np.mean([r.input_length for r in reqs])
         isl = int(mean_past + mean_input)
         prefix = int(mean_past)
-        correction = prefill_seq_imbalance_correction(reqs)
-        use_polynomial_fit = USE_POLYNOMIAL_FIT and model_supports_polynomial_fit(
-            MODEL_NAME, MODEL_PATH
+        correction = (
+            prefill_seq_imbalance_correction(reqs, MODEL_NAME, MODEL_PATH)
+            if ATTN_FLOPS_CORRELATION
+            else 1.0
         )
-        polynomial_request_infos = reqs if use_polynomial_fit else None
         if correction >= 0.4 and correction != 1.0:
             runtime_config = RuntimeConfig(
                 batch_size=len(reqs),
@@ -125,8 +124,6 @@ def estimate_batch_latency(reqs: List[RequestInfo], is_decode: bool) -> float:
                 prefix=prefix,
                 osl=1,
                 seq_imbalance_correction_scale=correction,
-                request_infos=polynomial_request_infos,
-                use_polynomial_fit=use_polynomial_fit,
             )
         else:
             runtime_config = RuntimeConfig(
@@ -134,8 +131,6 @@ def estimate_batch_latency(reqs: List[RequestInfo], is_decode: bool) -> float:
                 isl=isl,
                 prefix=prefix,
                 osl=1,
-                request_infos=polynomial_request_infos,
-                use_polynomial_fit=use_polynomial_fit,
             )
         summary = session.run_static(runtime_config, mode="static_ctx")
         latency_dict = summary.get_context_latency_dict()

@@ -21,6 +21,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 import aiconfigurator.sdk.operations as sdk_ops
+from aiconfigurator.sdk import interpolation
 from aiconfigurator.sdk.backends.factory import get_backend
 from aiconfigurator.sdk.common import DatabaseMode
 from aiconfigurator.sdk.config import ModelConfig, RuntimeConfig
@@ -57,6 +58,36 @@ _model = None
 _database = None
 
 
+def _patch_nearest_1d_point_helper(database):
+    """Keep old refactor extrapolation behavior across AIC SDK versions."""
+    original = getattr(
+        interpolation.nearest_1d_point_helper,
+        "_refactor_original",
+        interpolation.nearest_1d_point_helper,
+    )
+
+    def wrapped_nearest_1d_point_helper(x, values, inner_only=False):
+        return original(x, values, inner_only)
+
+    wrapped_nearest_1d_point_helper._refactor_original = original
+    interpolation.nearest_1d_point_helper = wrapped_nearest_1d_point_helper
+
+    database_helper = getattr(database, "_nearest_1d_point_helper", None)
+    if database_helper is not None:
+
+        def wrapped_database_nearest_1d_point_helper(x, values, inner_only=False):
+            return database_helper(x, values, inner_only)
+
+        database._nearest_1d_point_helper = wrapped_database_nearest_1d_point_helper
+
+
+def _nearest_1d_point(database, x, values, inner_only=False):
+    database_helper = getattr(database, "_nearest_1d_point_helper", None)
+    if database_helper is not None:
+        return database_helper(x, values, inner_only)
+    return interpolation.nearest_1d_point_helper(x, values, inner_only)
+
+
 def _get_session():
     """延迟初始化 AIC InferenceSession 单例，复用 stage2 的初始化逻辑。"""
     global _session, _model, _database
@@ -73,13 +104,8 @@ def _get_session():
     )
     _database.set_default_database_mode(DatabaseMode.SILICON)
 
-    # 禁用 inner_only 以支持更灵活的输入（与 stage2 一致）
-    db_nearest_1d_point_helper = _database._nearest_1d_point_helper
-
-    def wrapped_nearest_1d_point_helper(x, values, inner_only=False):
-        return db_nearest_1d_point_helper(x, values, inner_only)
-
-    _database._nearest_1d_point_helper = wrapped_nearest_1d_point_helper
+    # 禁用 inner_only 以支持更灵活的输入（与 stage2 一致）。
+    _patch_nearest_1d_point_helper(_database)
 
     model_config = ModelConfig(**MODEL_CONFIG_KWARGS)
     _model = get_model(
@@ -247,7 +273,8 @@ def _print_decode_moe_interp_debug(runtime_config, latency_dict):
             interp_raw = None
             interp_scaled = None
         else:
-            left_tok, right_tok = database._nearest_1d_point_helper(
+            left_tok, right_tok = _nearest_1d_point(
+                database,
                 query_tokens, token_points, inner_only=False
             )
             interp_result = database._interp_1d(

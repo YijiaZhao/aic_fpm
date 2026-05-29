@@ -44,6 +44,31 @@ from .utils import RequestInfo, logger, prefill_seq_imbalance_correction, write_
 _session = None  # 单例
 
 
+def _patch_nearest_1d_point_helper(database):
+    """Keep old refactor extrapolation behavior across AIC SDK versions."""
+    from aiconfigurator.sdk import interpolation
+
+    original = getattr(
+        interpolation.nearest_1d_point_helper,
+        "_refactor_original",
+        interpolation.nearest_1d_point_helper,
+    )
+
+    def wrapped_nearest_1d_point_helper(x, values, inner_only=False):
+        return original(x, values, inner_only)
+
+    wrapped_nearest_1d_point_helper._refactor_original = original
+    interpolation.nearest_1d_point_helper = wrapped_nearest_1d_point_helper
+
+    database_helper = getattr(database, "_nearest_1d_point_helper", None)
+    if database_helper is not None:
+
+        def wrapped_database_nearest_1d_point_helper(x, values, inner_only=False):
+            return database_helper(x, values, inner_only)
+
+        database._nearest_1d_point_helper = wrapped_database_nearest_1d_point_helper
+
+
 def _get_session():
     """延迟初始化 AIC InferenceSession 单例。"""
     global _session
@@ -66,13 +91,9 @@ def _get_session():
     )
     database.set_default_database_mode(DatabaseMode.SILICON)
 
-    # 禁用 inner_only 以支持更灵活的输入
-    db_nearest_1d_point_helper = database._nearest_1d_point_helper
-
-    def wrapped_nearest_1d_point_helper(x, values, inner_only=False):
-        return db_nearest_1d_point_helper(x, values, inner_only)
-
-    database._nearest_1d_point_helper = wrapped_nearest_1d_point_helper
+    # 禁用 inner_only 以支持更灵活的输入。新 AIC SDK 使用 interpolation
+    # 模块函数，旧 SDK 挂在 PerfDatabase 私有方法上；两边都兼容。
+    _patch_nearest_1d_point_helper(database)
 
     model_config = aic_cfg.ModelConfig(**MODEL_CONFIG_KWARGS)
     logger.debug(f"Model config: {model_config}")

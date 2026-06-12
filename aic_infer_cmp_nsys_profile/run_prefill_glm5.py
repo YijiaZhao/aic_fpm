@@ -395,8 +395,8 @@ def main():
         ep_size=args.ep_size,
         load_format="auto",
         trust_remote_code=True,
-        cuda_graph_max_bs=256 if is_glm5 else len(full_prompts),
-        disable_cuda_graph=True,
+        cuda_graph_max_bs=8 if is_glm5 else len(full_prompts),  # small=fast startup + valid (1 crashes empty bs); keep cuda graph ON
+        disable_cuda_graph=False,  # MUST be False: True disables piecewise + makes prefill eager (~330 vs trace ~300); trace serve has cuda graph ON
         disable_cuda_graph_padding=True,
         chunked_prefill_size=16384 if is_glm5 else 8192,
         max_running_requests=256 if is_glm5 else len(full_prompts),

@@ -6,6 +6,14 @@
 """
 
 import os
+import sys
+from pathlib import Path
+
+_AIC_SRC = Path(
+    os.environ.get("AIC_REPO_SRC", "/raid/kimi/ds4_new/aiconfigurator/src")
+)
+if _AIC_SRC.exists():
+    sys.path.insert(0, str(_AIC_SRC))
 
 from aiconfigurator.sdk.common import (
     CommQuantMode,
@@ -15,13 +23,21 @@ from aiconfigurator.sdk.common import (
     MoEQuantMode,
 )
 
+
+def _enum_value(enum_cls, *names):
+    for name in names:
+        if hasattr(enum_cls, name):
+            return getattr(enum_cls, name)
+    raise AttributeError(f"{enum_cls.__name__} has none of: {', '.join(names)}")
+
+
 # ============================================================================
 # 数据目录（容器内路径；宿主机映射路径请自行调整）
 # ============================================================================
 
 DATA_DIR = os.environ.get(
     "AIC_DATA_DIR",
-    "/raid/kimi/ds4_new/b200_glm5_cp_data",
+    "/raid/kimi/ds4_new/b300_deepseekv4_pro_data",
 )
 
 # JSONL 文件名（由 hook.py 生成）
@@ -39,14 +55,18 @@ SUBDIR_SIGNED_ERROR = "signed_error"  # 阶段 3: 误差桶分析输出
 # ============================================================================
 # 模型 / 后端参数
 # ============================================================================
-MODEL_NAME = "nvidia/GLM-5-NVFP4"
-MODEL_PATH = "/raid/kimi/ds4_new/model_configs/nvidia--GLM-5-NVFP4"
+MODEL_NAME = "deepseek-ai/DeepSeek-V4-Pro"
+MODEL_PATH = MODEL_NAME
+SGLANG_MODEL_PATH = os.environ.get(
+    "DSV4_PRO_MODEL_PATH",
+    "/raid/kimi/huggingface_cache/hub/models--deepseek-ai--DeepSeek-V4-Pro/snapshots/89d501aed998d33fa4f4702102ec1bb2331e10f6/",
+)
 BACKEND_NAME = "sglang"
 
 # AIC 性能数据库参数
-AIC_SYSTEM = "b200_sxm"
+AIC_SYSTEM = "b300_sxm"
 AIC_BACKEND = "sglang"
-AIC_VERSION = "0.5.12"
+AIC_VERSION = "0.5.12.post2.dev454+ge958f4561"
 
 # ============================================================================
 # ModelConfig 参数（对应 aiconfigurator.sdk.config.ModelConfig）
@@ -54,18 +74,17 @@ AIC_VERSION = "0.5.12"
 
 MODEL_CONFIG_KWARGS = dict(
     pp_size=1,
-    tp_size=1,  # attn head-split (attn_tp); CP run uses full heads + moe-dense-tp=1, so tp=1
-    moe_tp_size=8,
+    tp_size=4,
+    moe_tp_size=4,
     moe_ep_size=1,
     attention_dp_size=1,
-    attention_cp_size=8,  # context parallelism: 8-way round-robin token split (sglang --attn-cp-size=8)
     enable_wideep=False,
-    workload_distribution="power_law",
+    workload_distribution="power_law_1.2",
     # workload_distribution="balanced",
-    gemm_quant_mode=GEMMQuantMode.nvfp4,
-    moe_quant_mode=MoEQuantMode.nvfp4,
+    gemm_quant_mode=GEMMQuantMode.fp8_block,
+    moe_quant_mode=MoEQuantMode.w4a8_mxfp4_mxfp8_trtllm,
     kvcache_quant_mode=KVCacheQuantMode.fp8,  # fp8 -> fp8_e4m3
-    fmha_quant_mode=FMHAQuantMode.bfloat16,
+    fmha_quant_mode=_enum_value(FMHAQuantMode, "bfloat16", "float16"),
     comm_quant_mode=CommQuantMode.half,
 )
 
@@ -73,39 +92,24 @@ MODEL_CONFIG_KWARGS = dict(
 # SGLang Server 启动命令（用于 nsys_profiler 自动解析为 ServerArgs）
 # 直接粘贴你部署 sglang 时用的命令即可
 # ============================================================================
-SGLANG_LAUNCH_CMD = """
-SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0 \
-sglang serve \
+SGLANG_LAUNCH_CMD = f"""
+SGLANG_JIT_DEEPGEMM_PRECOMPILE=0 \
+python3 /raid/kimi/ds4_new/refactor_test_aic/hook_dataset_collector/sglang_launch_server.py \
   --trust-remote-code \
-  --model-path /raid/kimi/ds4_new/model_configs/nvidia--GLM-5-NVFP4 \
-  --disable-overlap-schedule \
-  --attention-backend nsa \
-  --chunked-prefill-size 16384 \
-  --disable-flashinfer-autotune \
-  --enable-cache-report \
-  --enable-dp-lm-head \
-  --kv-cache-dtype fp8_e4m3 \
-  --max-prefill-tokens 16384 \
-  --cuda-graph-max-bs 256 \
+  --model-path {SGLANG_MODEL_PATH} \
+  --tp 4 \
+  --cuda-graph-max-bs 128 \
+  --chunked-prefill-size 8192 \
   --disable-cuda-graph-padding \
   --max-running-requests 256 \
-  --mem-fraction-static 0.8 \
-  --moe-dense-tp-size 1 \
-  --quantization modelopt_fp4 \
-  --sampling-backend pytorch \
-  --tp-size 8 \
-  --watchdog-timeout 1000000 \
-  --enable-hierarchical-cache \
-  --hicache-io-backend kernel \
-  --hicache-mem-layout layer_first \
-  --hicache-ratio 1.5 \
-  --hicache-write-policy write_through_selective \
-  --numa-node 0 0 0 0 1 1 1 1 \
-  --enable-nsa-prefill-context-parallel \
-  --attn-cp-size 8 \
-  --nsa-prefill-cp-mode round-robin-split \
-  --nsa-prefill-backend flashmla_kv \
-  --nsa-decode-backend flashmla_kv
+  --mem-fraction-static 0.93 \
+  --attention-backend compressed \
+  --moe-runner-backend flashinfer_mxfp4 \
+  --kv-cache-dtype fp8_e4m3 \
+  --tool-call-parser deepseekv4 \
+  --reasoning-parser deepseek-v4 \
+  --disable-flashinfer-autotune \
+  --allow-auto-truncate
 """
 
 # ============================================================================
@@ -113,9 +117,7 @@ sglang serve \
 # ============================================================================
 DECODE_CORRECTION_FACTOR = 1.0
 PREFILL_CORRECTION_FACTOR = 1.0
-ATTN_FLOPS_CORRELATION = os.environ.get(
-    "AIC_ATTN_FLOPS_CORRELATION", "1"
-).lower() not in {"0", "false", "no", "off"}
+ATTN_FLOPS_CORRELATION = False
 
 # ============================================================================
 # 辅助函数：获取各阶段的绝对输出目录

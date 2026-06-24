@@ -21,7 +21,7 @@ from aiconfigurator.sdk.common import (
 
 DATA_DIR = os.environ.get(
     "AIC_DATA_DIR",
-    "/raid/kimi/ds4_new/b200_glm5_pccg_data",
+    "/raid/kimi/ds4_new/b200_glm5_pccg_data_0513",
 )
 
 # JSONL 文件名（由 hook.py 生成）
@@ -54,10 +54,11 @@ AIC_VERSION = "0.5.13"
 
 MODEL_CONFIG_KWARGS = dict(
     pp_size=1,
-    tp_size=8,
+    tp_size=1,  # attn head-split (attn_tp); CP run uses full heads + moe-dense-tp=1, so tp=1
     moe_tp_size=8,
     moe_ep_size=1,
     attention_dp_size=1,
+    attention_cp_size=8,  # context parallelism: 8-way round-robin token split (sglang --attn-cp-size=8)
     enable_wideep=False,
     workload_distribution="power_law",
     # workload_distribution="balanced",
@@ -93,7 +94,18 @@ sglang serve \
   --quantization modelopt_fp4 \
   --sampling-backend pytorch \
   --tp-size 8 \
-  --watchdog-timeout 1000000
+  --watchdog-timeout 1000000 \
+  --enable-hierarchical-cache \
+  --hicache-io-backend kernel \
+  --hicache-mem-layout layer_first \
+  --hicache-ratio 1.5 \
+  --hicache-write-policy write_through_selective \
+  --numa-node 0 0 0 0 1 1 1 1 \
+  --enable-nsa-prefill-context-parallel \
+  --attn-cp-size 8 \
+  --nsa-prefill-cp-mode round-robin-split \
+  --nsa-prefill-backend flashmla_kv \
+  --nsa-decode-backend flashmla_kv
 """
 
 # ============================================================================

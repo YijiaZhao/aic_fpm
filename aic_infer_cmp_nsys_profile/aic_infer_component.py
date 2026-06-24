@@ -315,6 +315,41 @@ def _print_decode_moe_interp_debug(runtime_config, latency_dict):
         print(json.dumps(moe_debug_rows, indent=2, default=str))
 
 
+def _print_op_table(latency_dict, is_decode, phase_label, threshold_pct=5.0):
+    """对齐 AIC 结果的标准输出: 5 列 (op/module, 层数, 总ms, 占比, per-layer ms).
+
+    - 层数        : op._scale_factor (该 op 在多少层里重复)
+    - per-layer   : 总ms / 层数
+    - 占比        : 总ms / sum(总ms)
+    - ``★`` 行内标记: 占比 >= threshold_pct (默认 5%), 即做 timeline 对齐时要关注的 op
+    - TOTAL 行    : 总时间 + 整体 per-layer (= 总时间 / num_layers)
+    """
+    _, model, _ = _get_session()
+    ops = model.generation_ops if is_decode else model.context_ops
+    sf = {op._name: float(getattr(op, "_scale_factor", 1) or 1) for op in ops}
+
+    total = sum(_safe_latency(e) for e in latency_dict.values())
+    num_layers = max(sf.values()) if sf else 1.0
+
+    rows = []
+    for name, entry in latency_dict.items():
+        val = _safe_latency(entry)
+        layers = sf.get(name, 1.0) or 1.0
+        pct = (val / total * 100.0) if total else 0.0
+        rows.append((name, layers, val, pct, val / layers if layers else 0.0))
+    rows.sort(key=lambda r: -r[3])
+
+    print("=== %s AIC per-op 标准表 (★ = 占比 >= %.0f%%) ===" % (phase_label, threshold_pct))
+    print("%-32s %6s %12s %8s %12s" % ("op/module", "层数", "总(ms)", "占比", "per-layer"))
+    print("-" * 76)
+    for name, layers, val, pct, per_layer in rows:
+        mark = "★" if pct >= threshold_pct else " "
+        print("%s %-30s %6.0f %12.4f %7.2f%% %12.4f" % (mark, name, layers, val, pct, per_layer))
+    print("-" * 76)
+    print("  %-30s %6.0f %12.4f %7.2f%% %12.4f"
+          % ("TOTAL", num_layers, total, 100.0, total / num_layers if num_layers else 0.0))
+
+
 def _print_results(
     case_id: Optional[int],
     is_decode: bool,
@@ -347,8 +382,7 @@ def _print_results(
         print(f"Measured Total : {measured_latency_ms:.3f} ms")
         print(f"APE            : {ape:.2f}%")
     print()
-    print(f"=== {phase_label} per-op breakdown ===")
-    print(json.dumps(latency_dict, indent=2, default=str))
+    _print_op_table(latency_dict, is_decode, phase_label)
 
     if is_decode:
         _print_decode_moe_interp_debug(runtime_config, latency_dict)

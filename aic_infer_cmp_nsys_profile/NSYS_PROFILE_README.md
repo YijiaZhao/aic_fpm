@@ -236,3 +236,77 @@ Local `.nsys-rep` copied from B200:
 ```text
 /home/scratch.kimiz_gpu_2/docker_v/agent_work_space/nsys/case712/repro/modules/default_mem_fraction_module_pcg_real_batch_nograd/case712_aic_attn_module_bs2_s8165_prefix55392_default_mfs_module_pcg_real_batch_nograd_piecewise16336_bc8d64bf_node.nsys-rep
 ```
+
+---
+
+# Context-Parallel (CP=8) reproduction — `--chunked-replay`
+
+GLM5 prefill with `--attn-cp-size 8` (DSA context parallel) needs a DIFFERENT
+replay path than the single-batch reconstruct. Use **`--chunked-replay`**.
+
+## Why the default (prime + single-extend) path is wrong for CP
+
+Reconstructing one batch (prime the prefix, then a single extend) gives a
+latency ~10-15x too high under CP (e.g. case 2054 4096/114688: 2510-3555ms vs
+real 262ms). Three stacked causes:
+
+1. **prime + single-extend** re-AllGathers the WHOLE prefix every step under CP
+   (a 700ms+ straggler-inflated AllGather). The serve never does this — it
+   builds the prefix KV incrementally via chunked prefill, so each step only
+   gathers its own fresh chunk.
+2. **ep_size** must be **1** (the serve runs MoE-TP, ep_size=1), NOT 8.
+   ep_size=8 (expert-parallel) makes the small final chunk's expert-dispatch
+   pathological while large 16384 chunks still look fine — that asymmetry is the
+   tell.
+3. **cold compile**: a chunk shape seen only once (the small final extend chunk)
+   is cold (~2500ms). Needs a warm pass.
+
+`--chunked-replay` fixes all three: forces `ep_size=1`, sends the FULL
+prefix+extend sequence fresh so chunked-prefill splits it into
+`chunked_prefill_size`-chunks + a final extend-chunk == the case, and runs
+2 passes with `flush_cache` between (PASS-2 is warm = the real number).
+
+## Run (no HTTP serve, offline sgl.Engine)
+
+```bash
+M=/workspace/cache/huggingface/hub/models--nvidia--GLM-5-NVFP4/snapshots/local
+D=/workspace/cache/b200_glm5_pccg_data_0513      # CP serve trace (_0513)
+python3 run_prefill_glm5.py --model $M --data-dir $D --csv-case-id 2054 \
+  --csv-path $D/csv/batches_output.csv \
+  --attn-cp-size 8 --tp-size 8 --ep-size 8 --chunked-replay
+```
+
+Read the **PASS-2** `[replay_run_batch]` line whose
+`input_length=[extend], past_kv_length=[prefix]` matches the case — that is the
+reproduced per-step latency. Case 2054 (4096/114688): PASS-2 ~= 227ms
+(no nsys) / 268ms (under nsys) vs measured 262ms.
+
+## nsys capture for CP
+
+The script's built-in `cudaProfilerStart/Stop` wraps PASS-2, so capture-range
+grabs the warm pass (all chunks, ending with the case chunk):
+
+```bash
+nsys profile -o repro2054_cp_engine --force-overwrite true \
+  --capture-range=cudaProfilerApi --capture-range-end=stop \
+  --trace=cuda,nvtx --sample=none --cpuctxsw=none \
+  python3 run_prefill_glm5.py --model $M --data-dir $D --csv-case-id 2054 \
+  --csv-path $D/csv/batches_output.csv \
+  --attn-cp-size 8 --tp-size 8 --ep-size 8 --chunked-replay
+```
+
+Healthy CP timeline (case 2054): flash_fwd_splitkv_mla (topk-capped) ~18%,
+mqa_logits ~12%, ncclAllGather ~12% (NOT straggler-dominated), reduce_scatter
+~8%, moe bmm ~12%. If AllGather is ~80%, you hit the prime+single-extend bug.
+
+## Notes
+
+- **CP prefill is eager-only on ALL sglang versions** (0.5.12 / 0.5.13 / main):
+  piecewise is force-disabled when `attn_cp_size>1` because DSA-CP comm passes a
+  `torch.cuda.Stream` into the torch.compile graph (dynamo: "cannot extract
+  sympy from Stream"). So for CP do NOT use the piecewise flags in this README's
+  earlier (non-CP) section — `--chunked-replay` already sets the correct eager
+  CP config.
+- **GPUs are NOT clock-locked** (no sudo in the pod; B200 idle 120MHz / boost
+  1965MHz, Applications Clocks "Not Active"). Expect ~10-15% run-to-run variance
+  from dynamic boost; take a representative warm value, not a single run.

@@ -244,19 +244,87 @@ def _repeat_or_truncate_tokens(input_ids: list[int], target_len: int) -> list[in
 # ============================================================================
 
 
+def _build_static_record_and_rids(args):
+    """static-mode: construct exactly (bs, avg-isl, avg-past-kv) from a real corpus.
+
+    Real tokens come from sglang's ShareGPT loader (auto-downloaded from HF if
+    absent) -- no captured trace JSONL needed. Each request gets a distinct
+    corpus slice + distinct first token (no radix prefix sharing). Lengths are
+    made exact by _repeat_or_truncate_tokens in the shared prompt loop.
+    """
+    import json
+    from transformers import AutoTokenizer
+    from sglang.benchmark.utils import download_and_cache_hf_file
+
+    prompt_len = int(args.avg_past_kv) + int(args.avg_isl)
+    tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    path = download_and_cache_hf_file(
+        "anon8231489123/ShareGPT_Vicuna_unfiltered",
+        "ShareGPT_V3_unfiltered_cleaned_split.json",
+    )
+    print(f"[static] corpus json: {path}")
+    data = json.load(open(path))
+    need = prompt_len * (int(args.bs) + 2)
+    pool = []
+    for conv in data:
+        for turn in conv.get("conversations", []):
+            v = turn.get("value", "")
+            if v:
+                pool.extend(tok(v, add_special_tokens=False)["input_ids"])
+        if len(pool) >= need:
+            break
+    if not pool:
+        pool = [100]
+    print(f"[static] corpus token pool={len(pool)} need={need} prompt_len={prompt_len}")
+
+    record_infos, rid_map = [], {}
+    span = max(1, len(pool) - prompt_len)
+    for i in range(int(args.bs)):
+        start = (i * prompt_len) % span if len(pool) > prompt_len else 0
+        ids = _repeat_or_truncate_tokens(pool[start:start + prompt_len] or pool, prompt_len)
+        ids = list(ids)
+        ids[0] = 1000 + i  # distinct first token -> distinct prefix, no radix sharing
+        rid = f"static-{i}"
+        rid_map[rid] = {"input_ids": ids}
+        record_infos.append({"rid": rid, "extend_input_len": int(args.avg_isl),
+                             "prefix_indices_len": int(args.avg_past_kv)})
+    return {"forward_mode": 1, "request_infos": record_infos}, rid_map
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Prefill replay — real tokens, real weights"
     )
     ap.add_argument("--data-dir", type=str, required=True)
     ap.add_argument("--tp-rank", type=int, default=0)
-    ap.add_argument("--csv-case-id", type=int, required=True)
+    ap.add_argument("--csv-case-id", type=int, required=False, default=-1)
+    ap.add_argument("--static-mode", action="store_true",
+        help="Synthetic static replay: construct exactly (bs, avg-isl, avg-past-kv) from a real corpus "
+             "(sharegpt, auto-downloaded via sglang); no trace JSONL needed.")
+    ap.add_argument("--bs", type=int, default=1, help="static-mode batch size")
+    ap.add_argument("--corpus", type=str, default="sharegpt", help="static-mode real-token corpus")
     ap.add_argument("--csv-path", type=str, default="")
+    ap.add_argument(
+        "--chunked-replay",
+        action="store_true",
+        help="Send the full prefix+extend sequence FRESH and let chunked-prefill "
+        "split it (chunk_size x N + final extend-chunk == the case), matching the "
+        "serve path. Avoids prime+single-extend (which re-AllGathers the whole "
+        "prefix per step under CP -> ~10x too slow). Forces ep_size=1 (MoE-TP, like "
+        "the serve) and runs 2 passes (warm shapes -> flush -> measure).",
+    )
     ap.add_argument(
         "--model", type=str, default="/models/Qwen3-235B-A22B-Instruct-2507-FP8"
     )
     ap.add_argument("--tp-size", type=int, default=8)
     ap.add_argument("--ep-size", type=int, default=8)
+    ap.add_argument(
+        "--attn-cp-size",
+        type=int,
+        default=1,
+        help="Attention context-parallel size (round-robin token split). >1 enables "
+        "NSA prefill CP, matching --attn-cp-size on the serve (e.g. 8 for GLM5 CP=8).",
+    )
     ap.add_argument(
         "--enforce-disable-flashinfer-allreduce-fusion",
         action="store_true",
@@ -296,29 +364,49 @@ def main():
     if (args.avg_isl > 0) != (args.avg_past_kv >= 0):
         raise ValueError("--avg-isl and --avg-past-kv must be provided together")
 
-    schedule_file, request_file = _find_data_files(args.data_dir, args.tp_rank)
-    csv_path = _find_csv_path(args.data_dir, args.csv_path)
-    print(f"[data] schedule: {schedule_file}")
-    print(f"[data] request: {request_file}")
-    print(f"[data] csv: {csv_path}")
+    if args.static_mode:
+        if not (args.avg_isl > 0 and args.avg_past_kv >= 0 and args.bs > 0):
+            raise ValueError("--static-mode requires --bs>0, --avg-isl>0, --avg-past-kv>=0")
+        # serve's radix-cached prefix is page-aligned (KV page_size=64): a non-aligned
+        # prefix can't be reproduced (radix only matches whole pages), so round down.
+        _PAGE = 64
+        if args.avg_past_kv % _PAGE != 0:
+            _aligned = (args.avg_past_kv // _PAGE) * _PAGE
+            print(f"[static] avg_past_kv {args.avg_past_kv} -> {_aligned} "
+                  f"(page_size {_PAGE} aligned; radix prefix cache matches whole pages only)")
+            args.avg_past_kv = _aligned
+    elif args.csv_case_id < 0:
+        raise ValueError("non-static mode requires --csv-case-id")
 
-    csv_row = _load_csv_row_by_case_id(csv_path, args.csv_case_id)
-    jsonl_line = _resolve_jsonl_case_id_from_csv(
-        schedule_file, csv_path, args.csv_case_id
-    )
-    print(f"[mapping] csv_case_id={args.csv_case_id} -> jsonl line {jsonl_line}")
+    if args.static_mode:
+        record, rid_map = _build_static_record_and_rids(args)
+        bs = len(record["request_infos"])
+        target_latency = 0.0
+        print(f"[static] bs={bs} isl={args.avg_isl} past_kv={args.avg_past_kv} corpus={args.corpus}")
+    else:
+        schedule_file, request_file = _find_data_files(args.data_dir, args.tp_rank)
+        csv_path = _find_csv_path(args.data_dir, args.csv_path)
+        print(f"[data] schedule: {schedule_file}")
+        print(f"[data] request: {request_file}")
+        print(f"[data] csv: {csv_path}")
 
-    record = _load_jsonl_record(schedule_file, jsonl_line)
-    fm = int(record["forward_mode"])
-    if fm != 1:
-        raise ValueError(f"Not a prefill batch: forward_mode={fm}")
+        csv_row = _load_csv_row_by_case_id(csv_path, args.csv_case_id)
+        jsonl_line = _resolve_jsonl_case_id_from_csv(
+            schedule_file, csv_path, args.csv_case_id
+        )
+        print(f"[mapping] csv_case_id={args.csv_case_id} -> jsonl line {jsonl_line}")
 
-    bs = len(record["request_infos"])
-    target_latency = record.get("iter_latency", 0) * 1000
-    print(f"[target] bs={bs}, latency={target_latency:.3f}ms")
+        record = _load_jsonl_record(schedule_file, jsonl_line)
+        fm = int(record["forward_mode"])
+        if fm != 1:
+            raise ValueError(f"Not a prefill batch: forward_mode={fm}")
 
-    rid_map = _load_request_ids(request_file)
-    print(f"[data] {len(rid_map)} requests loaded")
+        bs = len(record["request_infos"])
+        target_latency = record.get("iter_latency", 0) * 1000
+        print(f"[target] bs={bs}, latency={target_latency:.3f}ms")
+
+        rid_map = _load_request_ids(request_file)
+        print(f"[data] {len(rid_map)} requests loaded")
 
     prefix_prompts = []
     full_prompts = []
@@ -436,6 +524,20 @@ def main():
         }.items():
             if key in server_arg_names:
                 server_kwargs[key] = value
+    if is_glm5 and args.attn_cp_size > 1:
+        # Context-parallel (round-robin token split) prefill, matching the CP
+        # serve: --enable-nsa-prefill-context-parallel --attn-cp-size N
+        # --nsa-prefill-cp-mode round-robin-split. CP requires the flashmla_kv
+        # NSA backend (the trtllm NSA backend does not do prefill CP on Blackwell).
+        for key, value in {
+            "enable_dsa_prefill_context_parallel": True,
+            "attn_cp_size": args.attn_cp_size,
+            "dsa_prefill_cp_mode": "round-robin-split",
+            "dsa_prefill_backend": "flashmla_kv",
+            "dsa_decode_backend": "flashmla_kv",
+        }.items():
+            if key in server_arg_names:
+                server_kwargs[key] = value
     if "enable_piecewise_cuda_graph" in server_arg_names:
         server_kwargs["enable_piecewise_cuda_graph"] = True
     elif "disable_piecewise_cuda_graph" in server_arg_names:
@@ -477,9 +579,39 @@ def main():
     guard_file = f"/tmp/sglang_replay_shape_guard_{os.getpid()}"
     os.environ["SGLANG_REPLAY_EXPECT_SHAPE"] = json.dumps(expected_shape)
     os.environ["SGLANG_REPLAY_SHAPE_GUARD_FILE"] = guard_file
+    if args.chunked_replay:
+        server_kwargs["ep_size"] = 1  # match serve: MoE-TP, not expert-parallel
     server_args = ServerArgs(**server_kwargs)
     llm = Engine(**asdict(server_args))
 
+    if args.chunked_replay:
+        import time as _time
+
+        print("[chunked-replay] PASS 1 (warm all chunk shapes incl final extend) ...", flush=True)
+        _ = llm.generate(
+            input_ids=full_prompts,
+            sampling_params={"temperature": 0, "top_p": 1, "max_new_tokens": 1},
+        )
+        llm.flush_cache()
+        _time.sleep(2)
+        print("[chunked-replay] PASS 2 (measured; warm) ...", flush=True)
+        torch.cuda.cudart().cudaProfilerStart()
+        outputs = llm.generate(
+            input_ids=full_prompts,
+            sampling_params={"temperature": 0, "top_p": 1, "max_new_tokens": 1},
+        )
+        torch.cuda.cudart().cudaProfilerStop()
+        _tgt = sorted(
+            {(int(ri["input_length"]), int(ri["past_kv_length"])) for ri in request_infos}
+        )
+        print(
+            f"[chunked-replay] target (extend,past_kv)={_tgt}; the matching PASS-2 "
+            f"[replay_run_batch] line is the case latency",
+            flush=True,
+        )
+        print(f"\n[done] {len(outputs)} outputs")
+        llm.shutdown()
+        return
     if any(len(p) > 1 for p in prefix_prompts):
         print("\n[warmup] Priming prefix cache...")
         _ = llm.generate(

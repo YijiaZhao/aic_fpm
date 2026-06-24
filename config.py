@@ -97,7 +97,7 @@ sglang serve \
 """
 
 # ============================================================================
-# 估算校正系数（来自 refactor_test_aic/stage2_run_aic_estimation.py ）
+# 估算校正系数（来自 aic_fpm/stage2_run_aic_estimation.py ）
 # ============================================================================
 DECODE_CORRECTION_FACTOR = 1.0
 PREFILL_CORRECTION_FACTOR = 1.0

@@ -24,8 +24,8 @@ csv.field_size_limit(sys.maxsize)
 
 
 def setup_logging(level: int = logging.INFO) -> logging.Logger:
-    """配置并返回 refactor_test_aic 的根 logger。"""
-    logger = logging.getLogger("refactor_test_aic")
+    """配置并返回 aic_fpm 的根 logger。"""
+    logger = logging.getLogger("aic_fpm")
     if not logger.handlers:
         handler = logging.StreamHandler()
         fmt = logging.Formatter(

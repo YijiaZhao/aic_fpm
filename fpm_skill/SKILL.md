@@ -49,12 +49,12 @@ description: >
 
 **AIC 侧**(可在任意有 AIC SDK 的机器,本项目默认 `.8` = `root@10.6.131.8`,经 `ssh kimiz@computelab` 跳):
 - 代码根:`/raid/kimi/ds4_new/aiconfigurator`
-- 对齐工具:`/raid/kimi/ds4_new/refactor_test_aic/aic_infer_cmp_nsys_profile/`
+- 对齐工具:`/raid/kimi/ds4_new/aic_fpm/aic_infer_cmp_nsys_profile/`
   - `aic_infer_component.py` — AIC per-op 标准表(本流程第 1 步)
   - `nsys_profile.py` — 抓 serve nsys timeline
   - `compare_aic_nsys.py` — 核心对齐器(nsys kernel → AIC op,per-layer 对比)
   - `compare_aic_nsys_usage.md` / `nsys_op_debug.py` — 用法 + kernel 调试
-- 统一配置:`/raid/kimi/ds4_new/refactor_test_aic/config.py`(MODEL_CONFIG_KWARGS、tp/cp、数据目录)
+- 统一配置:`/raid/kimi/ds4_new/aic_fpm/config.py`(MODEL_CONFIG_KWARGS、tp/cp、数据目录)
 - 运行环境变量:
   ```bash
   export PYTHONPATH=/raid/kimi/ds4_new/aiconfigurator/src:/raid/kimi/ds4_new/aiconfigurator:/raid/kimi/ds4_new
@@ -138,7 +138,7 @@ max_position=202752;`--kv-cache-dtype fp8_ds_mla`;DSA backend = **trtllm**(非CP
 `★` = 占比≥5%,TOTAL 行 = 总时间 + 整体 per-layer(=总/num_layers)。
 
 ```bash
-cd /raid/kimi/ds4_new/refactor_test_aic/aic_infer_cmp_nsys_profile
+cd /raid/kimi/ds4_new/aic_fpm/aic_infer_cmp_nsys_profile
 export PYTHONPATH=/raid/kimi/ds4_new/aiconfigurator/src:/raid/kimi/ds4_new/aiconfigurator:/raid/kimi/ds4_new
 
 # 手动指定(注意 --isl 是 TOTAL = isl+prefix)
@@ -292,7 +292,7 @@ nsys export --type sqlite --force-overwrite true -o serve.sqlite <serve.nsys-rep
 
 ## Refactor 组件清单(每步用哪个、怎么用、里面要有什么)
 
-根目录:`/raid/kimi/ds4_new/refactor_test_aic/`(.8;pod 上为 `/workspace/cache/refactor_test_aic/`)。
+根目录:`/raid/kimi/ds4_new/aic_fpm/`(.8;pod 上为 `/workspace/cache/aic_fpm/`)。
 子目录 `aic_infer_cmp_nsys_profile/` = 对齐工具集。
 
 | 组件 | 步骤 | 作用 / 怎么用 | 里面必须有 |

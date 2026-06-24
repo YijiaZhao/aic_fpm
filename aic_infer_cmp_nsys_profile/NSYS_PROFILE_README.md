@@ -9,7 +9,7 @@ B200 pod:
 ```bash
 NS=kimiz-glm5
 POD=glm5-jsonl-b200-piecewise-rebench-20260526
-RUN_DIR=/workspace/cache/refactor_test_aic/aic_infer_cmp_nsys_profile
+RUN_DIR=/workspace/cache/aic_fpm/aic_infer_cmp_nsys_profile
 DATA=/workspace/cache/results/case712_prefill_data
 MODEL=/workspace/cache/huggingface/hub/models--nvidia--GLM-5-NVFP4/snapshots/local
 OUT=/workspace/cache/results/case712_prefill_analysis_20260526_targetnsys
@@ -27,7 +27,7 @@ OUT=/workspace/cache/results/case712_prefill_analysis_20260526_targetnsys
 `.8` synced replay script:
 
 ```bash
-/raid/kimi/ds4_new/refactor_test_aic/aic_infer_cmp_nsys_profile/run_prefill_glm5.py
+/raid/kimi/ds4_new/aic_fpm/aic_infer_cmp_nsys_profile/run_prefill_glm5.py
 ```
 
 ## run_prefill_glm5.py requirements
@@ -65,8 +65,8 @@ DATA=/workspace/cache/results/case712_prefill_data
 MODEL=/workspace/cache/huggingface/hub/models--nvidia--GLM-5-NVFP4/snapshots/local
 mkdir -p "$OUT"
 rm -f "$OUT"/case712_target_node.* "$OUT"/run_prefill_case712_targetnsys.log "$OUT"/run_prefill.exit
-cd /workspace/cache/refactor_test_aic/aic_infer_cmp_nsys_profile
-export PYTHONPATH=/sgl-workspace/sglang/python:/workspace/cache/refactor_test_aic:/workspace/cache/refactor_test_aic/aic_infer_cmp_nsys_profile:${PYTHONPATH:-}
+cd /workspace/cache/aic_fpm/aic_infer_cmp_nsys_profile
+export PYTHONPATH=/sgl-workspace/sglang/python:/workspace/cache/aic_fpm:/workspace/cache/aic_fpm/aic_infer_cmp_nsys_profile:${PYTHONPATH:-}
 export PYTHONUNBUFFERED=1
 
 nsys profile \
@@ -141,18 +141,18 @@ scp "$TMP"/* root@10.6.131.8:/raid/kimi/ds4_new/b200_glm5_pccg_data/nsys/case712
 
 ```bash
 kubectl -n kimiz-glm5 cp \
-  glm5-jsonl-b200-piecewise-rebench-20260526:/workspace/cache/refactor_test_aic/aic_infer_cmp_nsys_profile/run_prefill.py \
+  glm5-jsonl-b200-piecewise-rebench-20260526:/workspace/cache/aic_fpm/aic_infer_cmp_nsys_profile/run_prefill.py \
   /tmp/run_prefill_glm5.py
 
 scp /tmp/run_prefill_glm5.py \
-  root@10.6.131.8:/raid/kimi/ds4_new/refactor_test_aic/aic_infer_cmp_nsys_profile/run_prefill_glm5.py
+  root@10.6.131.8:/raid/kimi/ds4_new/aic_fpm/aic_infer_cmp_nsys_profile/run_prefill_glm5.py
 ```
 
 Verify the piecewise rounding on `.8`:
 
 ```bash
 ssh root@10.6.131.8 \
-  'grep -n "piecewise_capture_tokens" /raid/kimi/ds4_new/refactor_test_aic/aic_infer_cmp_nsys_profile/run_prefill_glm5.py'
+  'grep -n "piecewise_capture_tokens" /raid/kimi/ds4_new/aic_fpm/aic_infer_cmp_nsys_profile/run_prefill_glm5.py'
 ```
 
 Expected:

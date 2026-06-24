@@ -3,7 +3,7 @@
 GLM-5 decode replay tool. Real tokens, real weights.
 
 This is the decode-only counterpart of run_prefill_glm5.py. It follows the
-GLM-5 launch configuration from refactor_test_aic/config.py, keeps regular CUDA
+GLM-5 launch configuration from aic_fpm/config.py, keeps regular CUDA
 graph enabled, and explicitly disables piecewise CUDA graph.
 """
 

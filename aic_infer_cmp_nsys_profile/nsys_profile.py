@@ -32,7 +32,7 @@ DEFAULT_CONTAINER = "mry-aic-collect"
 DEFAULT_DATA_DIR = "/host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt"
 DEFAULT_NSYS_DIR = None  # 默认 = {data_dir}/nsys
 DEFAULT_MODEL = "/models/Qwen3-235B-A22B-Instruct-2507-FP8"
-DEFAULT_WORKDIR = "/host/aiconfigurator/refactor_test_aic/aic_infer_cmp_nsys_profile"
+DEFAULT_WORKDIR = "/host/aiconfigurator/aic_fpm/aic_infer_cmp_nsys_profile"
 DEFAULT_TP_SIZE = 8
 DEFAULT_EP_SIZE = 8
 DEFAULT_DECODE_ITERS = 3

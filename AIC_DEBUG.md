@@ -1,6 +1,6 @@
 # AIC 单步时延预估准确度评测 — 调试与使用指南
 
-本文档涵盖 `refactor_test_aic` 模块的完整使用流程，包括数据集采集、AIC 预估、准确度分析、nsys/torch profiling 以及 OP 级别误差定位。
+本文档涵盖 `aic_fpm` 模块的完整使用流程，包括数据集采集、AIC 预估、准确度分析、nsys/torch profiling 以及 OP 级别误差定位。
 
 ---
 
@@ -21,7 +21,7 @@
 ## 模块总览
 
 ```
-refactor_test_aic/
+aic_fpm/
 ├── config.py                        # 统一配置（模型参数、路径、AIC SDK 配置、校正系数）
 ├── utils.py                         # 公共工具（日志、CSV 读写、RequestInfo 数据类）
 ├── pipeline.py                      # 主流水线入口（串联 Stage 1-3）
@@ -68,7 +68,7 @@ export SGL_HOOK_REQ_INFO_DIR=/host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_
 # 启用 Hook 数据采集
 export SGL_HOOK_FETCH_BATCH_INFO=1
 
-python3 /host/aiconfigurator/refactor_test_aic/hook_dataset_collector/sglang_launch_server.py \
+python3 /host/aiconfigurator/aic_fpm/hook_dataset_collector/sglang_launch_server.py \
     --model-path /models/Qwen3-235B-A22B-Instruct-2507-FP8 \
     --disable-overlap-schedule \
     --mem-fraction-static 0.8 \
@@ -189,7 +189,7 @@ export AIC_DATA_DIR=/host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt
 
 ```bash
 # 运行全部阶段 (Stage 1 + 2 + 3)
-python3 -m refactor_test_aic.pipeline \
+python3 -m aic_fpm.pipeline \
     --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt/
 ```
 
@@ -197,16 +197,16 @@ python3 -m refactor_test_aic.pipeline \
 
 ```bash
 # 跳过 Stage 1（已有 CSV）
-python3 -m refactor_test_aic.pipeline --data-dir ... --skip 1
+python3 -m aic_fpm.pipeline --data-dir ... --skip 1
 
 # 跳过 Stage 1 和 2（已有 CSV + estimation，只重跑分析）
-python3 -m refactor_test_aic.pipeline --data-dir ... --skip 1 2
+python3 -m aic_fpm.pipeline --data-dir ... --skip 1 2
 
 # 只运行 Stage 3（准确度分析）
-python3 -m refactor_test_aic.pipeline --data-dir ... --only 3
+python3 -m aic_fpm.pipeline --data-dir ... --only 3
 
 # 只运行 Stage 2 和 3
-python3 -m refactor_test_aic.pipeline --data-dir ... --only 2 3
+python3 -m aic_fpm.pipeline --data-dir ... --only 2 3
 ```
 
 > **`--skip` 和 `--only` 不能同时使用。**
@@ -215,13 +215,13 @@ python3 -m refactor_test_aic.pipeline --data-dir ... --only 2 3
 
 ```bash
 # Stage 1: JSONL → CSV
-python3 -m refactor_test_aic.stage1_convert_batch_log --data-dir ...
+python3 -m aic_fpm.stage1_convert_batch_log --data-dir ...
 
 # Stage 2: AIC 时延估算（需要 GPU + aiconfigurator SDK）
-python3 -m refactor_test_aic.stage2_run_aic_estimation --data-dir ...
+python3 -m aic_fpm.stage2_run_aic_estimation --data-dir ...
 
 # Stage 3: 准确度分析
-python3 -m refactor_test_aic.stage3_analyze_accuracy --data-dir ...
+python3 -m aic_fpm.stage3_analyze_accuracy --data-dir ...
 ```
 
 ### 2.5 各阶段说明
@@ -261,7 +261,7 @@ python3 -m refactor_test_aic.stage3_analyze_accuracy --data-dir ...
 
 ```bash
 # dry-run 验证 prompt 构建
-python3 -m refactor_test_aic.nsys_profiler --case-id 42 --dry-run
+python3 -m aic_fpm.nsys_profiler --case-id 42 --dry-run
 
 # 基础 nsys profiling（外层包 nsys）
 nsys profile -o report \
@@ -270,11 +270,11 @@ nsys profile -o report \
   -t cuda,nvtx,osrt \
   --cuda-graph-trace=node \
   --sample=none --cpuctxsw=none \
-  python3 -m refactor_test_aic.nsys_profiler --case-id 42
+  python3 -m aic_fpm.nsys_profiler --case-id 42
 
 # 按 batch_size + seq_len 匹配
 nsys profile -o report --capture-range=cudaProfilerApi \
-  python3 -m refactor_test_aic.nsys_profiler --batch-size 16 --seq-len 128
+  python3 -m aic_fpm.nsys_profiler --batch-size 16 --seq-len 128
 
 # 带 Python 调用栈（推荐，可看到 kernel 对应的 Python 代码）
 nsys profile -o report \
@@ -282,7 +282,7 @@ nsys profile -o report \
   --python-backtrace=cuda \
   --python-sampling=true \
   --cpuctxsw=process-tree \
-  python3 -m refactor_test_aic.nsys_profiler --case-id 42
+  python3 -m aic_fpm.nsys_profiler --case-id 42
 ```
 
 **nsys_profiler.py 参数**:
@@ -325,7 +325,7 @@ python nsys_profile.py --mode prefill --case-id 321 --dry-run
 
 ```bash
 # Prefill
-cd /host/aiconfigurator/refactor_test_aic/aic_infer_cmp_nsys_profile/ && \
+cd /host/aiconfigurator/aic_fpm/aic_infer_cmp_nsys_profile/ && \
 FLASHINFER_DISABLE_VERSION_CHECK=1 \
 nsys profile \
   -f true \
@@ -344,7 +344,7 @@ nsys profile \
     --ep-size 8
 
 # Decode
-cd /host/aiconfigurator/refactor_test_aic/aic_infer_cmp_nsys_profile && \
+cd /host/aiconfigurator/aic_fpm/aic_infer_cmp_nsys_profile && \
 FLASHINFER_DISABLE_VERSION_CHECK=1 \
 nsys profile \
   -f true \
@@ -437,11 +437,11 @@ python3 torch_profiler.py --launch-server \
 
 ```bash
 # 自定义 prefix + extend
-python3 -m refactor_test_aic.torch_profiler --mode engine \
+python3 -m aic_fpm.torch_profiler --mode engine \
     --custom-prefix-len 100 --custom-extend-len 10
 
 # 从 JSONL case 加载
-python3 -m refactor_test_aic.torch_profiler --mode engine \
+python3 -m aic_fpm.torch_profiler --mode engine \
     --case-id 42
 ```
 

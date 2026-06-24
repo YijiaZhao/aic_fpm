@@ -30,7 +30,7 @@ from aiconfigurator.sdk.models import get_model
 from aiconfigurator.sdk.perf_database import get_database, get_systems_paths
 
 # ---------------------------------------------------------------------------
-# 复用 refactor_test_aic 的统一配置
+# 复用 aic_fpm 的统一配置
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import (

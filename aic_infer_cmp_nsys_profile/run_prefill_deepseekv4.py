@@ -108,8 +108,8 @@ def _install_scheduler_nvtx_hook() -> None:
     import torch
 
     hook_dirs = [
-        "/home/scratch.kimiz_gpu_2/docker_v/agent_work_space/b300_glm5_runtime/ds4_new/refactor_test_aic/hook_dataset_collector",
-        "/raid/kimi/ds4_new/refactor_test_aic/hook_dataset_collector",
+        "/home/scratch.kimiz_gpu_2/docker_v/agent_work_space/b300_glm5_runtime/ds4_new/aic_fpm/hook_dataset_collector",
+        "/raid/kimi/ds4_new/aic_fpm/hook_dataset_collector",
         os.path.join(os.path.dirname(__file__), "hook_dataset_collector"),
     ]
     for hook_dir in hook_dirs:

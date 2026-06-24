@@ -94,7 +94,7 @@ MODEL_CONFIG_KWARGS = dict(
 # ============================================================================
 SGLANG_LAUNCH_CMD = f"""
 SGLANG_JIT_DEEPGEMM_PRECOMPILE=0 \
-python3 /raid/kimi/ds4_new/refactor_test_aic/hook_dataset_collector/sglang_launch_server.py \
+python3 /raid/kimi/ds4_new/aic_fpm/hook_dataset_collector/sglang_launch_server.py \
   --trust-remote-code \
   --model-path {SGLANG_MODEL_PATH} \
   --tp 4 \
@@ -113,7 +113,7 @@ python3 /raid/kimi/ds4_new/refactor_test_aic/hook_dataset_collector/sglang_launc
 """
 
 # ============================================================================
-# 估算校正系数（来自 refactor_test_aic/stage2_run_aic_estimation.py ）
+# 估算校正系数（来自 aic_fpm/stage2_run_aic_estimation.py ）
 # ============================================================================
 DECODE_CORRECTION_FACTOR = 1.0
 PREFILL_CORRECTION_FACTOR = 1.0

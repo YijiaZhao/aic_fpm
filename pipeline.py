@@ -7,13 +7,13 @@ AIC 单步时延预估准确度评测 — 主流水线
   Stage 3: 准确度分析（MAPE + 误差桶）
 用法:
   # 运行全部阶段
-  python3 -m refactor_test_aic.pipeline --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp/
+  python3 -m aic_fpm.pipeline --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp/
 
   # 跳过某些阶段（例如已有 CSV，只想重跑分析）
-  python3 -m refactor_test_aic.pipeline --data-dir ... --skip 1 2
+  python3 -m aic_fpm.pipeline --data-dir ... --skip 1 2
 
   # 只跑 stage 3
-  python3 -m refactor_test_aic.pipeline --data-dir ... --only 3
+  python3 -m aic_fpm.pipeline --data-dir ... --only 3
 """
 
 import argparse
@@ -99,13 +99,13 @@ def main():
         epilog="""\
 示例:
   # 运行全部阶段
-  python3 -m refactor_test_aic.pipeline --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp/
+  python3 -m aic_fpm.pipeline --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp/
 
   # 跳过 Stage 1 和 2（已有 CSV + estimation）
-  python3 -m refactor_test_aic.pipeline --data-dir ... --skip 1 2
+  python3 -m aic_fpm.pipeline --data-dir ... --skip 1 2
 
   # 只运行 Stage 3
-  python3 -m refactor_test_aic.pipeline --data-dir ... --only 3
+  python3 -m aic_fpm.pipeline --data-dir ... --only 3
 
 阶段说明:
   1 - JSONL -> CSV 转换

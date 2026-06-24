@@ -20,7 +20,7 @@ AIC per-op 预估 vs nsys 实测 kernel 时延对比工具。
 
 ```bash
 docker exec mry-aic-collect python3 \
-    /host/aiconfigurator/refactor_test_aic/aic_infer_cmp_nsys_profile/compare_aic_nsys.py \
+    /host/aiconfigurator/aic_fpm/aic_infer_cmp_nsys_profile/compare_aic_nsys.py \
     --nsys-sqlite /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt/nsys/nsys_prefill_case_1115.sqlite \
     --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt/ \
     --case-id 1115
@@ -30,7 +30,7 @@ docker exec mry-aic-collect python3 \
 
 ```bash
 docker exec mry-aic-collect python3 \
-    /host/aiconfigurator/refactor_test_aic/aic_infer_cmp_nsys_profile/compare_aic_nsys.py \
+    /host/aiconfigurator/aic_fpm/aic_infer_cmp_nsys_profile/compare_aic_nsys.py \
     --nsys-rep /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt/nsys/nsys_prefill_case_1115.nsys-rep \
     --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt/ \
     --case-id 1115
@@ -42,7 +42,7 @@ docker exec mry-aic-collect python3 \
 
 ```bash
 docker exec mry-aic-collect python3 \
-    /host/aiconfigurator/refactor_test_aic/aic_infer_cmp_nsys_profile/compare_aic_nsys.py \
+    /host/aiconfigurator/aic_fpm/aic_infer_cmp_nsys_profile/compare_aic_nsys.py \
     --nsys-sqlite /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt/nsys/nsys_decode_case_6.sqlite \
     --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt/ \
     --case-id 6
@@ -141,7 +141,7 @@ context_moe_post_dispatch                       6.024     21.823    -15.799   -7
 
 ```bash
 docker exec mry-aic-collect python3 \
-    /host/aiconfigurator/refactor_test_aic/aic_infer_cmp_nsys_profile/compare_aic_nsys.py \
+    /host/aiconfigurator/aic_fpm/aic_infer_cmp_nsys_profile/compare_aic_nsys.py \
     --nsys-sqlite /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt/nsys/nsys_prefill_case_1115.sqlite \
     --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp_new_gt/ \
     --case-id 1115 --multi-rank

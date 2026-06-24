@@ -19,7 +19,7 @@ from dataclasses import asdict, fields
 import torch
 
 # hook.py lives next to this script in ../hook_dataset_collector when copied
-# into refactor_test_aic/aic_infer_cmp_nsys_profile.
+# into aic_fpm/aic_infer_cmp_nsys_profile.
 sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "hook_dataset_collector")
 )

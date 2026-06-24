@@ -1,4 +1,4 @@
-# refactor_test_aic — AIC 单步时延预估准确度评测工具包
+# aic_fpm — AIC 单步时延预估准确度评测工具包
 
 对 AIConfigurator (AIC) 的单步推理时延预估结果进行端到端的准确度评测。
 包含 3 个流水线阶段 + 1 个独立的 nsys profiling 工具。
@@ -6,7 +6,7 @@
 ## 目录结构
 
 ```
-refactor_test_aic/
+aic_fpm/
 ├── config.py              # 统一配置（路径、模型参数、SGLang 启动命令等）
 ├── utils.py               # 公共工具（数据类、CSV 读写、日志、计算函数）
 ├── stage1_convert_batch_log.py   # 阶段 1: JSONL → CSV
@@ -30,16 +30,16 @@ refactor_test_aic/
 docker exec -it -w /host/aiconfigurator/test_aic mry-aic bash
 
 # 运行全部阶段（Stage 2 需要 GPU）
-python3 -m refactor_test_aic.pipeline
+python3 -m aic_fpm.pipeline
 
 # 跳过 Stage 1、2，只跑准确度分析
-python3 -m refactor_test_aic.pipeline --skip 1 2
+python3 -m aic_fpm.pipeline --skip 1 2
 
 # 只跑 Stage 1
-python3 -m refactor_test_aic.pipeline --only 1
+python3 -m aic_fpm.pipeline --only 1
 
 # 指定数据目录
-python3 -m refactor_test_aic.pipeline --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp/
+python3 -m aic_fpm.pipeline --data-dir /host/aiconfigurator/batch_info/qwen3-235B-A22B/ep_tp/
 ```
 
 ## 流水线阶段
@@ -56,7 +56,7 @@ python3 -m refactor_test_aic.pipeline --data-dir /host/aiconfigurator/batch_info
 
 ```bash
 # 单独运行
-python3 -m refactor_test_aic.stage1_convert_batch_log
+python3 -m aic_fpm.stage1_convert_batch_log
 ```
 
 ### Stage 2: AIC 时延预估
@@ -74,7 +74,7 @@ python3 -m refactor_test_aic.stage1_convert_batch_log
 - Decode / Prefill 分别应用校正系数（`config.py` 中配置）
 
 ```bash
-python3 -m refactor_test_aic.stage2_run_aic_estimation
+python3 -m aic_fpm.stage2_run_aic_estimation
 ```
 
 ### Stage 3: 准确度分析
@@ -91,7 +91,7 @@ python3 -m refactor_test_aic.stage2_run_aic_estimation
 - 分别生成 clip=30% 和 clip=0（无裁剪）的图表
 
 ```bash
-python3 -m refactor_test_aic.stage3_analyze_accuracy
+python3 -m aic_fpm.stage3_analyze_accuracy
 ```
 
 ## 输出目录结构
@@ -138,11 +138,11 @@ python3 -m refactor_test_aic.stage3_analyze_accuracy
 
 ```bash
 # 1. 先用 --dry-run 验证 prompt 构建（不需要 GPU）
-python3 -m refactor_test_aic.nsys_profiler --case-id 42 --dry-run
+python3 -m aic_fpm.nsys_profiler --case-id 42 --dry-run
 
 # 2. 基础 profiling（仅 GPU kernel + NVTX）
 nsys profile -o report --capture-range=cudaProfilerApi \
-    python3 -m refactor_test_aic.nsys_profiler --case-id 42
+    python3 -m aic_fpm.nsys_profiler --case-id 42
 
 # 3. 带 Python 调用栈（推荐！可看到每个 kernel 对应的 Python 代码位置）
 nsys profile -o report \
@@ -150,14 +150,14 @@ nsys profile -o report \
     --python-backtrace=cuda \
     --python-sampling=true \
     --cpuctxsw=process-tree \
-    python3 -m refactor_test_aic.nsys_profiler --case-id 42
+    python3 -m aic_fpm.nsys_profiler --case-id 42
 
 # 4. 按 (batch_size, seq_len) 匹配
 nsys profile -o report --capture-range=cudaProfilerApi \
-    python3 -m refactor_test_aic.nsys_profiler --batch-size 16 --seq-len 128
+    python3 -m aic_fpm.nsys_profiler --batch-size 16 --seq-len 128
 
 # 5. 覆盖模型路径（默认从 config.py 的 SGLANG_LAUNCH_CMD 解析）
-python3 -m refactor_test_aic.nsys_profiler --case-id 42 --model /models/other-model
+python3 -m aic_fpm.nsys_profiler --case-id 42 --model /models/other-model
 ```
 
 ### nsys Python 调用栈参数说明
